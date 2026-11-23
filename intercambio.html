@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Santa secreto - Ruleta</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+        }
+        .card {
+            width: min(100%, 480px);
+            padding: 24px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0,0,0,.25);
+        }
+        h1, h2 { color: #333; margin: 0 0 16px; }
+        h1 { font-size: 24px; }
+        h2 { font-size: 20px; }
+        p { color: #555; line-height: 1.4; }
+        input, button { font: inherit; }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+        }
+        button {
+            border: 0;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: white;
+            background: #667eea;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        button:disabled { background: #aaa; cursor: not-allowed; }
+        button:focus-visible, input:focus-visible { outline: 3px solid #f7dc6f; outline-offset: 2px; }
+        .full { width: 100%; margin-top: 12px; }
+        .primary { background: #38a169; }
+        .secondary { background: #6b7280; }
+        .names {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 16px 0;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .tag { background: #edf2ff; color: #4338ca; padding: 6px 10px; border-radius: 16px; overflow-wrap: anywhere; }
+        .error { color: #b91c1c; min-height: 1.4em; margin: 8px 0 0; }
+        .wheel-area { text-align: center; }
+        .pointer {
+            position: relative;
+            z-index: 1;
+            width: 0;
+            height: 0;
+            margin: 0 auto -14px;
+            border-left: 14px solid transparent;
+            border-right: 14px solid transparent;
+            border-top: 28px solid #333;
+        }
+        canvas { display: block; width: min(100%, 360px); height: auto; margin: auto; cursor: pointer; }
+        .player-list { display: grid; gap: 8px; max-height: 50vh; overflow-y: auto; }
+        .overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            background: rgba(0,0,0,.6);
+        }
+        .overlay .card { max-height: 90vh; overflow-y: auto; text-align: center; }
+        .result { color: #667eea; font-size: 36px; font-weight: bold; overflow-wrap: anywhere; }
+        [hidden] { display: none !important; }
+    </style>
+</head>
+<body>
+    <main class="card" id="setup">
+        <h1>🎉 Santa secreto</h1>
+        <p>Agrega de 2 a 20 participantes y pasa este teléfono para que cada persona gire la ruleta.</p>
+        <p>No cierres ni recargues la página durante el sorteo: se perderá el progreso.</p>
+        <form id="nameForm">
+            <label for="nameInput">Nombre del participante</label>
+            <input id="nameInput" type="text" maxlength="60" autocomplete="off" placeholder="Nombre...">
+            <button type="submit" class="full">+ Agregar</button>
+        </form>
+        <p class="error" id="error" role="alert"></p>
+        <div class="names" id="namesPreview" aria-label="Participantes"></div>
+        <button id="startBtn" class="full primary" disabled>Comenzar</button>
+    </main>
+
+    <main class="card wheel-area" id="game" hidden>
+        <h1>🎁 Ruleta de Santa secreto</h1>
+        <p id="turn"></p>
+        <div class="pointer"></div>
+        <canvas id="wheel" width="400" height="400" aria-hidden="true"></canvas>
+        <button id="spinBtn" class="full primary">Girar la ruleta</button>
+        <p id="progress" aria-live="polite"></p>
+        <div class="names" id="completed" aria-label="Ya participaron"></div>
+        <button id="resetBtn" class="full secondary">Empezar de nuevo</button>
+    </main>
+
+    <div class="overlay" id="selectModal" hidden>
+        <section class="card" role="dialog" aria-modal="true" aria-labelledby="selectTitle">
+            <h2 id="selectTitle">¿Quién va a girar?</h2>
+            <p>Pasa el teléfono a esa persona y pídele que elija su nombre.</p>
+            <div class="player-list" id="playerList"></div>
+        </section>
+    </div>
+
+    <div class="overlay" id="resultModal" hidden>
+        <section class="card" role="dialog" aria-modal="true" aria-labelledby="resultTitle">
+            <h2 id="resultTitle">Te toca regalarle a:</h2>
+            <p class="result" id="resultName"></p>
+            <p>Guarda el secreto antes de pasar el teléfono.</p>
+            <button id="confirmBtn" class="full primary">Ya lo vi</button>
+        </section>
+    </div>
+
+    <script>
+        const names = [];
+        let remaining = [];
+        let completed = [];
+        let currentPlayer = null;
+        let pending = null;
+        let spinning = false;
+        let angle = 0;
+
+        const $ = id => document.getElementById(id);
+        const canvas = $('wheel');
+        const ctx = canvas.getContext('2d');
+        const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
+
+        function eligibleTargets(remaining, players, player) {
+            return remaining.filter(target => {
+                if (target === player) return false;
+                if (remaining.length !== 2) return true;
+                const lastPlayer = players.find(name => name !== player);
+                return remaining.find(name => name !== target) !== lastPlayer;
+            });
+        }
+
+        function drawWheel() {
+            const slices = Math.max(names.length, 2);
+            const sliceAngle = Math.PI * 2 / slices;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < slices; i++) {
+                ctx.beginPath();
+                ctx.moveTo(200, 200);
+                ctx.arc(200, 200, 195, angle + i * sliceAngle, angle + (i + 1) * sliceAngle);
+                ctx.closePath();
+                ctx.fillStyle = colors[i % colors.length];
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function renderTags(container, values) {
+            container.replaceChildren();
+            values.forEach(name => {
+                const tag = document.createElement('span');
+                tag.className = 'tag';
+                tag.textContent = name;
+                container.appendChild(tag);
+            });
+        }
+
+        $('nameForm').addEventListener('submit', event => {
+            event.preventDefault();
+            const input = $('nameInput');
+            const name = input.value.trim();
+            if (!name) {
+                $('error').textContent = 'Escribe un nombre.';
+            } else if (names.some(existing => existing.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+                $('error').textContent = 'Ese nombre ya está en la lista. Usa nombres distintos.';
+            } else if (names.length >= 20) {
+                $('error').textContent = 'El máximo es de 20 participantes.';
+            } else {
+                names.push(name);
+                input.value = '';
+                $('error').textContent = '';
+                renderTags($('namesPreview'), names);
+                $('startBtn').disabled = names.length < 2;
+            }
+            input.focus();
+        });
+
+        function showSelector() {
+            const players = names.filter(name => !completed.includes(name));
+            const list = $('playerList');
+            list.replaceChildren();
+            players.forEach(name => {
+                const button = document.createElement('button');
+                button.textContent = name;
+                button.addEventListener('click', () => {
+                    currentPlayer = name;
+                    $('turn').textContent = 'Turno de ' + name;
+                    $('selectModal').hidden = true;
+                    $('spinBtn').focus();
+                });
+                list.appendChild(button);
+            });
+            $('selectModal').hidden = false;
+            list.firstElementChild.focus();
+        }
+
+        $('startBtn').addEventListener('click', () => {
+            remaining = [...names];
+            completed = [];
+            $('setup').hidden = true;
+            $('game').hidden = false;
+            updateProgress();
+            drawWheel();
+            showSelector();
+        });
+
+        $('spinBtn').addEventListener('click', () => {
+            if (spinning || currentPlayer === null) return;
+            const players = names.filter(name => !completed.includes(name));
+            const choices = eligibleTargets(remaining, players, currentPlayer);
+            if (choices.length === 0) {
+                $('turn').textContent = 'No hay una asignación válida. Reinicia el sorteo.';
+                return;
+            }
+            pending = choices[Math.floor(Math.random() * choices.length)];
+            spinning = true;
+            $('spinBtn').disabled = true;
+            $('resetBtn').disabled = true;
+            const startAngle = angle;
+            const distance = (5 + Math.random() * 3) * Math.PI * 2;
+            const start = performance.now();
+
+            function animate(now) {
+                const progress = Math.min((now - start) / 3000, 1);
+                angle = startAngle + distance * (1 - Math.pow(1 - progress, 3));
+                drawWheel();
+                if (progress < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    spinning = false;
+                    $('resultName').textContent = pending;
+                    $('resultModal').hidden = false;
+                    $('confirmBtn').focus();
+                }
+            }
+            requestAnimationFrame(animate);
+        });
+        canvas.addEventListener('click', () => $('spinBtn').click());
+
+        function updateProgress() {
+            $('progress').textContent = completed.length + ' de ' + names.length + ' participantes han girado.';
+            renderTags($('completed'), completed);
+        }
+
+        $('confirmBtn').addEventListener('click', () => {
+            if (pending === null) return;
+            remaining = remaining.filter(name => name !== pending);
+            completed.push(currentPlayer);
+            currentPlayer = null;
+            pending = null;
+            $('resultName').textContent = '';
+            $('resultModal').hidden = true;
+            $('resetBtn').disabled = false;
+            updateProgress();
+            if (completed.length === names.length) {
+                $('turn').textContent = '¡Todos participaron! El sorteo terminó.';
+                $('spinBtn').hidden = true;
+                $('resetBtn').focus();
+            } else {
+                $('spinBtn').disabled = false;
+                showSelector();
+            }
+        });
+
+        $('resetBtn').addEventListener('click', () => {
+            if (!confirm('¿Empezar de nuevo? Se perderá el sorteo actual.')) return;
+            names.length = 0;
+            remaining = [];
+            completed = [];
+            currentPlayer = null;
+            pending = null;
+            angle = 0;
+            $('game').hidden = true;
+            $('setup').hidden = false;
+            $('spinBtn').hidden = false;
+            $('spinBtn').disabled = false;
+            $('startBtn').disabled = true;
+            $('error').textContent = '';
+            renderTags($('namesPreview'), names);
+            $('nameInput').value = '';
+            $('nameInput').focus();
+        });
+    </script>
+</body>
+</html>
