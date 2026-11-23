@@ -73,6 +73,19 @@
         }
         .tag { background: #e2efe5; color: #174b37; padding: 6px 10px; border-radius: 16px; overflow-wrap: anywhere; }
         .error { color: #b91c1c; min-height: 1.4em; margin: 8px 0 0; }
+        .storage-alert {
+            position: fixed;
+            z-index: 3000;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            padding: 14px;
+            border: 2px solid #b91c1c;
+            border-radius: 10px;
+            background: #fffaf0;
+            color: #991b1b;
+            box-shadow: 0 5px 20px rgba(0,0,0,.25);
+        }
         .wheel-area { text-align: center; }
         .pointer {
             position: relative;
@@ -190,10 +203,14 @@
     </style>
 </head>
 <body>
+    <div class="storage-alert" id="storageAlert" role="alert" hidden>
+        <span id="storageMessage"></span>
+        <button id="discardSavedBtn" class="full secondary" hidden>Descartar progreso dañado</button>
+    </div>
     <main class="card" id="setup">
         <h1>🎉 Santa secreto</h1>
         <p>Agrega de 2 a 20 participantes y pasa este teléfono para que cada persona gire la ruleta.</p>
-        <p>No cierres ni recargues la página durante el sorteo: se perderá el progreso.</p>
+        <p>El progreso se guarda en este navegador y teléfono. No uses navegación privada ni borres los datos del navegador.</p>
         <form id="nameForm">
             <label for="nameInput">Nombre del participante</label>
             <input id="nameInput" type="text" maxlength="60" autocomplete="off" placeholder="Nombre...">
@@ -256,8 +273,12 @@
         let assignments = [];
         let currentPlayer = null;
         let pending = null;
+        let started = false;
         let spinning = false;
         let angle = 0;
+        const storageKey = 'santa-secreto-ruleta-v1';
+        let savedValue = null;
+        let storageBlocked = false;
         const $ = id => document.getElementById(id);
         const canvas = $('wheel');
         const ctx = canvas.getContext('2d');
@@ -274,6 +295,59 @@
                 }
                 return !seen.has(target);
             });
+        }
+
+        function showStorageError(message, canDiscard = false) {
+            $('storageMessage').textContent = message;
+            $('discardSavedBtn').hidden = !canDiscard;
+            $('storageAlert').hidden = false;
+        }
+
+        function saveState(changes = {}) {
+            if (storageBlocked) return false;
+            try {
+                if (localStorage.getItem(storageKey) !== savedValue) {
+                    showStorageError('El sorteo cambió en otra pestaña. Recarga esta página para recuperar el progreso.');
+                    return false;
+                }
+                const state = { version: 1, started, names, assignments, currentPlayer, pending, ...changes };
+                const value = JSON.stringify(state);
+                localStorage.setItem(storageKey, value);
+                savedValue = value;
+                $('storageAlert').hidden = true;
+                return true;
+            } catch (error) {
+                console.error('Error al guardar el sorteo:', error);
+                showStorageError('No se pudo guardar el progreso. Revisa el almacenamiento del navegador e inténtalo de nuevo.');
+                return false;
+            }
+        }
+
+        function validSavedState(state) {
+            if (!state || typeof state !== 'object' || state.version !== 1 ||
+                typeof state.started !== 'boolean' || !Array.isArray(state.names) ||
+                !Array.isArray(state.assignments) || state.names.length > 20 ||
+                !state.names.every(name => typeof name === 'string' && name.length <= 60 &&
+                    name.length > 0 && name === name.trim()) ||
+                new Set(state.names.map(name => name.toLocaleLowerCase())).size !== state.names.length) return false;
+            if (!state.started) {
+                return state.assignments.length === 0 && state.currentPlayer === null && state.pending === null;
+            }
+            if (state.names.length < 2) return false;
+            let available = [...state.names];
+            let players = [...state.names];
+            const previous = [];
+            for (const pair of state.assignments) {
+                if (!pair || typeof pair !== 'object' || !players.includes(pair.player) ||
+                    !eligibleTargets(available, players, pair.player, previous).includes(pair.target)) return false;
+                available = available.filter(name => name !== pair.target);
+                players = players.filter(name => name !== pair.player);
+                previous.push(pair);
+            }
+            if (state.currentPlayer !== null && !players.includes(state.currentPlayer)) return false;
+            if (state.pending !== null && (state.currentPlayer === null ||
+                !eligibleTargets(available, players, state.currentPlayer, previous).includes(state.pending))) return false;
+            return true;
         }
 
         function drawWheel(opening = 0) {
@@ -350,6 +424,15 @@
             ctx.restore();
         }
 
+        function showReveal(opacity) {
+            const reveal = $('wheelReveal');
+            reveal.style.fontSize = pending.length > 40 ? '10px' : pending.length > 25 ? '12px' : '16px';
+            reveal.style.opacity = String(opacity);
+            reveal.hidden = false;
+            reveal.textContent = pending;
+            return reveal;
+        }
+
         function renderTags(container, values) {
             container.replaceChildren();
             values.forEach(name => {
@@ -371,6 +454,7 @@
             } else if (names.length >= 20) {
                 $('error').textContent = 'El máximo es de 20 participantes.';
             } else {
+                if (!saveState({ names: [...names, name] })) return;
                 names.push(name);
                 input.value = '';
                 $('error').textContent = '';
@@ -388,6 +472,7 @@
                 const button = document.createElement('button');
                 button.textContent = name;
                 button.addEventListener('click', () => {
+                    if (!saveState({ currentPlayer: name })) return;
                     currentPlayer = name;
                     $('turn').textContent = 'Turno de ' + name;
                     $('selectModal').hidden = true;
@@ -400,6 +485,8 @@
         }
 
         $('startBtn').addEventListener('click', () => {
+            if (!saveState({ started: true })) return;
+            started = true;
             remaining = [...names];
             completed = [];
             assignments = [];
@@ -411,20 +498,23 @@
         });
 
         $('changePlayerBtn').addEventListener('click', () => {
+            if (!saveState({ currentPlayer: null })) return;
             currentPlayer = null;
             $('turn').textContent = 'Elige quién girará la ruleta.';
             showSelector();
         });
 
         $('spinBtn').addEventListener('click', () => {
-            if (spinning || currentPlayer === null) return;
+            if (spinning || currentPlayer === null || pending !== null) return;
             const players = names.filter(name => !completed.includes(name));
             const choices = eligibleTargets(remaining, players, currentPlayer, assignments);
             if (choices.length === 0) {
                 $('turn').textContent = 'No hay una asignación válida. Reinicia el sorteo.';
                 return;
             }
-            pending = choices[Math.floor(Math.random() * choices.length)];
+            const target = choices[Math.floor(Math.random() * choices.length)];
+            if (!saveState({ pending: target })) return;
+            pending = target;
             spinning = true;
             $('spinBtn').disabled = true;
             $('changePlayerBtn').disabled = true;
@@ -442,11 +532,7 @@
                     requestAnimationFrame(animate);
                 } else {
                     const revealStart = now;
-                    const reveal = $('wheelReveal');
-                    reveal.style.fontSize = pending.length > 40 ? '10px' : pending.length > 25 ? '12px' : '16px';
-                    reveal.style.opacity = '0';
-                    reveal.hidden = false;
-                    reveal.textContent = pending;
+                    const reveal = showReveal(0);
                     $('spinBtn').hidden = true;
                     $('changePlayerBtn').hidden = true;
                     $('confirmBtn').hidden = false;
@@ -476,6 +562,8 @@
 
         $('confirmBtn').addEventListener('click', () => {
             if (pending === null || spinning) return;
+            const nextAssignments = [...assignments, { player: currentPlayer, target: pending }];
+            if (!saveState({ assignments: nextAssignments, currentPlayer: null, pending: null })) return;
             remaining = remaining.filter(name => name !== pending);
             completed.push(currentPlayer);
             assignments.push({ player: currentPlayer, target: pending });
@@ -607,7 +695,9 @@
         });
         $('resetBtn').addEventListener('click', () => {
             if (!confirm('¿Empezar de nuevo? Se perderá el sorteo actual.')) return;
+            if (!saveState({ started: false, names: [], assignments: [], currentPlayer: null, pending: null })) return;
             names.length = 0;
+            started = false;
             remaining = [];
             completed = [];
             assignments = [];
@@ -628,6 +718,97 @@
             $('nameInput').value = '';
             $('nameInput').focus();
         });
+
+        $('discardSavedBtn').addEventListener('click', () => {
+            if (!confirm('¿Descartar el progreso guardado dañado? Esta acción no se puede deshacer.')) return;
+            try {
+                if (localStorage.getItem(storageKey) !== savedValue) {
+                    showStorageError('El sorteo cambió en otra pestaña. Recarga esta página para recuperar el progreso.');
+                    return;
+                }
+                localStorage.removeItem(storageKey);
+                savedValue = null;
+                storageBlocked = false;
+                $('storageAlert').hidden = true;
+                $('discardSavedBtn').hidden = true;
+                $('nameInput').focus();
+            } catch (error) {
+                console.error('Error al descartar el progreso:', error);
+                showStorageError('No se pudo descartar el progreso. Revisa el almacenamiento del navegador.', true);
+            }
+        });
+
+        function restoreState() {
+            try {
+                savedValue = localStorage.getItem(storageKey);
+            } catch (error) {
+                console.error('Error al leer el sorteo:', error);
+                storageBlocked = true;
+                showStorageError('No se pudo leer el progreso. Habilita el almacenamiento y vuelve a abrir la página.');
+                return;
+            }
+            if (savedValue === null) return;
+            let state;
+            try {
+                state = JSON.parse(savedValue);
+            } catch (error) {
+                console.error('El progreso guardado no es válido:', error);
+                storageBlocked = true;
+                showStorageError('El progreso guardado está dañado y no se ha sobrescrito.', true);
+                return;
+            }
+            if (!validSavedState(state)) {
+                storageBlocked = true;
+                showStorageError('El progreso guardado está dañado y no se ha sobrescrito.', true);
+                return;
+            }
+
+            names.push(...state.names);
+            assignments = state.assignments;
+            started = state.started;
+            currentPlayer = state.currentPlayer;
+            pending = state.pending;
+            if (!started) {
+                renderTags($('namesPreview'), names);
+                $('startBtn').disabled = names.length < 2;
+                return;
+            }
+            completed = assignments.map(pair => pair.player);
+            remaining = names.filter(name => !assignments.some(pair => pair.target === name));
+            $('setup').hidden = true;
+            $('game').hidden = false;
+            updateProgress();
+            if (completed.length === names.length) {
+                $('turn').textContent = '¡Todos participaron! El sorteo terminó.';
+                $('spinBtn').hidden = true;
+                $('changePlayerBtn').hidden = true;
+                drawWheel();
+                $('resetBtn').focus();
+            } else if (pending !== null) {
+                $('turn').textContent = 'Turno de ' + currentPlayer;
+                $('spinBtn').hidden = true;
+                $('spinBtn').disabled = true;
+                $('changePlayerBtn').hidden = true;
+                $('changePlayerBtn').disabled = true;
+                $('resetBtn').disabled = true;
+                $('adminBtn').disabled = true;
+                $('confirmBtn').hidden = false;
+                $('confirmBtn').disabled = false;
+                drawWheel(1);
+                showReveal(1);
+                $('confirmBtn').focus();
+            } else {
+                drawWheel();
+                if (currentPlayer === null) {
+                    showSelector();
+                } else {
+                    $('turn').textContent = 'Turno de ' + currentPlayer;
+                    $('spinBtn').focus();
+                }
+            }
+        }
+
+        restoreState();
     </script>
 </body>
 </html>

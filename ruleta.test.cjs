@@ -113,6 +113,7 @@ function fakeElement() {
     return {
         hidden: false, disabled: false, textContent: '', style: {}, children: [], events: {},
         addEventListener(type, handler) { this.events[type] = handler; },
+        click() { if (!this.disabled && this.events.click) this.events.click(); },
         appendChild(child) { this.children.push(child); },
         replaceChildren(...children) { this.children = children; },
         get firstElementChild() { return this.children[0]; },
@@ -131,14 +132,27 @@ getElementById('confirmBtn').hidden = true;
 getElementById('wheelReveal').hidden = true;
 getElementById('selectModal').hidden = true;
 let frame;
+let storedValue = null;
+let failWrites = false;
+const localStorage = {
+    getItem() { return storedValue; },
+    setItem(key, value) {
+        if (failWrites) throw new Error('Almacenamiento no disponible');
+        storedValue = value;
+    },
+    removeItem() { storedValue = null; }
+};
 const page = vm.createContext({
     document: { getElementById, createElement: fakeElement },
     performance: { now: () => 0 },
-    requestAnimationFrame(callback) { frame = callback; }
+    requestAnimationFrame(callback) { frame = callback; },
+    localStorage,
+    console: { error() {} }
 });
 vm.runInContext(script[1], page);
-vm.runInContext("names.push('Ana', 'Beto'); remaining = [...names]; currentPlayer = 'Ana';", page);
+vm.runInContext("names.push('Ana', 'Beto'); remaining = [...names]; currentPlayer = 'Ana'; started = true;", page);
 
+let pendingSnapshot;
 function spinAndConfirm(expected) {
     getElementById('spinBtn').events.click();
     frame(3000);
@@ -149,12 +163,24 @@ function spinAndConfirm(expected) {
     frame(3700);
     assert.equal(getElementById('confirmBtn').disabled, false);
     assert.equal(getElementById('wheelReveal').textContent, expected);
+    const saved = JSON.parse(storedValue);
+    assert.equal(saved.pending, expected);
+    assert.equal(saved.assignments.length, expected === 'Beto' ? 0 : 1);
+    if (expected === 'Beto') pendingSnapshot = storedValue;
+    failWrites = true;
+    getElementById('confirmBtn').events.click();
+    assert.equal(getElementById('confirmBtn').hidden, false);
+    assert.equal(getElementById('wheelReveal').textContent, expected);
+    assert.equal(getElementById('storageAlert').hidden, false);
+    assert.equal(JSON.parse(storedValue).pending, expected);
+    failWrites = false;
     getElementById('confirmBtn').events.click();
     assert.equal(getElementById('confirmBtn').hidden, true);
     assert.equal(getElementById('wheelReveal').hidden, true);
     assert.equal(getElementById('wheelReveal').textContent, '');
 }
 spinAndConfirm('Beto');
+const partialSnapshot = storedValue;
 assert.equal(getElementById('selectModal').hidden, false);
 assert.equal(getElementById('spinBtn').hidden, false);
 assert.equal(getElementById('changePlayerBtn').hidden, false);
@@ -164,3 +190,59 @@ assert.equal(getElementById('spinBtn').hidden, true);
 assert.equal(getElementById('changePlayerBtn').hidden, true);
 assert.equal(getElementById('progress').textContent, '2 de 2 participantes han girado.');
 console.log('La confirmación reemplaza los botones y restaura el siguiente turno.');
+
+function reloadFrom(value) {
+    storedValue = value;
+    const restored = new Map();
+    function getRestored(id) {
+        if (!restored.has(id)) restored.set(id, fakeElement());
+        return restored.get(id);
+    }
+    const restoredWheel = getRestored('wheel');
+    restoredWheel.width = restoredWheel.height = 400;
+    restoredWheel.getContext = () => ctx;
+    for (const id of ['game', 'confirmBtn', 'wheelReveal', 'selectModal', 'storageAlert', 'discardSavedBtn']) {
+        getRestored(id).hidden = true;
+    }
+    const reloadedPage = vm.createContext({
+        document: { getElementById: getRestored, createElement: fakeElement },
+        localStorage,
+        console: { error() {} },
+        performance: { now: () => 0 },
+        requestAnimationFrame() { throw new Error('No debe girar al restaurar'); }
+    });
+    vm.runInContext(script[1], reloadedPage);
+    return getRestored;
+}
+
+const pendingPage = reloadFrom(pendingSnapshot);
+assert.equal(pendingPage('wheelReveal').textContent, 'Beto');
+assert.equal(pendingPage('confirmBtn').hidden, false);
+assert.equal(pendingPage('spinBtn').disabled, true);
+pendingPage('wheel').click();
+assert.equal(storedValue, pendingSnapshot);
+const partialPage = reloadFrom(partialSnapshot);
+assert.equal(partialPage('selectModal').hidden, false);
+assert.equal(partialPage('playerList').children[0].textContent, 'Beto');
+const completedSnapshot = JSON.stringify({
+    version: 1, started: true, names: ['Ana', 'Beto'],
+    assignments: [{ player: 'Ana', target: 'Beto' }, { player: 'Beto', target: 'Ana' }],
+    currentPlayer: null, pending: null
+});
+const completedPage = reloadFrom(completedSnapshot);
+assert.equal(completedPage('progress').textContent, '2 de 2 participantes han girado.');
+assert.equal(completedPage('spinBtn').hidden, true);
+const corruptPage = reloadFrom('{dañado');
+assert.equal(corruptPage('storageAlert').hidden, false);
+assert.equal(corruptPage('discardSavedBtn').hidden, false);
+assert.equal(storedValue, '{dañado');
+const invalidCycle = JSON.stringify({
+    version: 1, started: true, names: ['Ana', 'Beto', 'Ceci'],
+    assignments: [{ player: 'Ana', target: 'Beto' }, { player: 'Beto', target: 'Ana' }],
+    currentPlayer: null, pending: null
+});
+const invalidPage = reloadFrom(invalidCycle);
+assert.equal(invalidPage('storageAlert').hidden, false);
+assert.equal(invalidPage('discardSavedBtn').hidden, false);
+assert.equal(storedValue, invalidCycle);
+console.log('El progreso pendiente, parcial y final se restaura sin repetir giros.');
