@@ -90,48 +90,62 @@
             min-width: 100%;
             padding: 18px;
         }
-        .garland { position: relative; display: flex; gap: 32px; width: max-content; }
+        .garland { position: relative; display: flex; flex-direction: column; gap: 32px; width: max-content; margin: auto; }
         .garland.connected::before {
             content: '';
             position: absolute;
-            top: 10px;
-            left: 50px;
-            right: 50px;
-            height: 4px;
+            top: 50px;
+            bottom: 50px;
+            left: 11px;
+            width: 4px;
             background: #24543b;
         }
         .bulb {
             position: relative;
             flex: 0 0 100px;
-            width: 100px;
-            padding-top: 21px;
+            width: 146px;
+            height: 100px;
+            padding-left: 22px;
         }
         .bulb::before {
             content: '';
             position: absolute;
-            top: 3px;
-            left: 38px;
-            width: 24px;
-            height: 20px;
+            top: 38px;
+            left: 3px;
+            width: 20px;
+            height: 24px;
             border-radius: 4px;
-            background: repeating-linear-gradient(#566e59 0 4px, #324d3b 4px 6px);
+            background: repeating-linear-gradient(90deg, #566e59 0 4px, #324d3b 4px 6px);
         }
         .bulb-light {
+            position: relative;
+            isolation: isolate;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 6px;
-            width: 100px;
-            height: 82px;
-            border: 2px solid rgba(95, 73, 34, .35);
-            border-radius: 45% 45% 50% 50% / 35% 35% 65% 65%;
-            background: var(--bulb-color);
-            box-shadow: inset 8px 5px 12px rgba(255,255,255,.55), 0 0 12px rgba(230,189,76,.35);
+            width: 124px;
+            height: 100px;
             color: #263d30;
             font-size: 12px;
             font-weight: bold;
             line-height: 1.1;
             overflow-wrap: anywhere;
+        }
+        .bulb-light::before {
+            content: '';
+            position: absolute;
+            z-index: -1;
+            box-sizing: border-box;
+            top: 50%;
+            left: 50%;
+            width: 76px;
+            height: 124px;
+            transform: translate(-50%, -50%) rotate(-90deg);
+            border: 2px solid rgba(95, 73, 34, .35);
+            border-radius: 45% 45% 50% 50% / 35% 35% 65% 65%;
+            background: var(--bulb-color);
+            box-shadow: inset 8px 5px 12px rgba(255,255,255,.55), 0 0 12px rgba(230,189,76,.35);
         }
         .overlay {
             position: fixed;
@@ -202,7 +216,7 @@
             </form>
             <div id="adminResults" hidden>
                 <p id="garlandHint"></p>
-                <p>Desliza para ver todos los focos.</p>
+                <p>Desliza hacia abajo para ver todos los focos.</p>
                 <div class="diagram-viewport" tabindex="0" aria-label="Desplazar diagrama">
                     <div class="diagram" id="assignmentDiagram" role="img"></div>
                 </div>
@@ -481,8 +495,8 @@
                 diagram.appendChild(garland);
             });
             $('garlandHint').textContent = assignments.length === names.length
-                ? 'De izquierda a derecha, cada persona le regala a la siguiente. La última le regala a la primera.'
-                : 'Los focos conectados indican quién le regala a la persona de su derecha. Los demás aún no están conectados.';
+                ? 'De arriba abajo, cada persona le regala a la siguiente. La última le regala a la primera.'
+                : 'Los focos conectados indican quién le regala a la persona de abajo. Los demás aún no están conectados.';
             diagram.parentElement.scrollLeft = 0;
             diagram.parentElement.scrollTop = 0;
         }
