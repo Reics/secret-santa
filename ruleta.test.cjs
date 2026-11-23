@@ -43,8 +43,28 @@ for (let count = 2; count <= 5; count++) {
     const players = Array.from({ length: count }, (_, index) => String(index));
     check(players, players);
 }
+{
+    let remaining = ['Ana', 'Bruno', 'Carla', 'Diego', 'Elena', 'Fabian', 'Gabriela', 'Hugo', 'Iris', 'Jorge'];
+    let players = [...remaining];
+    const assignments = [];
+    const turns = [
+        ['Ana', 'Bruno'], ['Carla', 'Ana'], ['Bruno', 'Diego'], ['Diego', 'Elena'],
+        ['Elena', 'Fabian'], ['Fabian', 'Gabriela'], ['Gabriela', 'Hugo'],
+        ['Hugo', 'Iris'], ['Iris', 'Jorge'], ['Jorge', 'Carla']
+    ];
+    for (const [player, target] of turns) {
+        assert.ok(eligibleTargets(remaining, players, player, assignments).includes(target));
+        assignments.push({ player, target });
+        remaining = remaining.filter(name => name !== target);
+        players = players.filter(name => name !== player);
+    }
+    assertSingleCycle(assignments);
+    assert.equal(assignments[1].target, assignments[0].player);
+    assert.notEqual(assignments[assignments.length - 1].target, assignments[0].player);
+    assert.equal(remaining.length, 0);
+}
 for (let run = 0; run < 200; run++) {
-    let players = Array.from({ length: 20 }, (_, index) => String(index));
+    let players = Array.from({ length: 50 }, (_, index) => String(index));
     let remaining = [...players];
     const assignments = [];
     while (players.length) {
@@ -60,7 +80,20 @@ for (let run = 0; run < 200; run++) {
     assert.equal(remaining.length, 0);
     assertSingleCycle(assignments);
 }
-console.log('Un solo círculo válido: órdenes de 2 a 5 participantes y sorteos de 20.');
+console.log('Un solo círculo válido: órdenes de 2 a 5 participantes y sorteos de 50.');
+
+const validationSource = html.match(/function validSavedState\([\s\S]*?\r?\n        }\r?\n/);
+assert.ok(validationSource, 'No se encontró la validación del progreso guardado');
+const validSavedState = vm.runInNewContext(`(${validationSource[0]})`, { eligibleTargets });
+const fiftyNames = Array.from({ length: 50 }, (_, index) => `Persona ${index + 1}`);
+const savedFifty = {
+    version: 1, started: true, names: fiftyNames,
+    assignments: fiftyNames.map((player, index) => ({ player, target: fiftyNames[(index + 1) % 50] })),
+    currentPlayer: null, pending: null
+};
+assert.equal(validSavedState(savedFifty), true);
+assert.equal(validSavedState({ ...savedFifty, names: [...fiftyNames, 'Persona 51'] }), false);
+console.log('El progreso acepta 50 participantes y rechaza 51.');
 
 const chainsSource = html.match(/function assignmentChains\([\s\S]*?\r?\n        }\r?\n/);
 assert.ok(chainsSource, 'No se encontró la función de la guirnalda');

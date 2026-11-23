@@ -209,7 +209,7 @@
     </div>
     <main class="card" id="setup">
         <h1>🎉 Santa secreto</h1>
-        <p>Agrega de 2 a 20 participantes y pasa este teléfono para que cada persona gire la ruleta.</p>
+        <p>Agrega de 2 a 50 participantes y pasa este teléfono para que cada persona gire la ruleta.</p>
         <p>El progreso se guarda en este navegador y teléfono. No uses navegación privada ni borres los datos del navegador.</p>
         <form id="nameForm">
             <label for="nameInput">Nombre del participante</label>
@@ -326,7 +326,7 @@
         function validSavedState(state) {
             if (!state || typeof state !== 'object' || state.version !== 1 ||
                 typeof state.started !== 'boolean' || !Array.isArray(state.names) ||
-                !Array.isArray(state.assignments) || state.names.length > 20 ||
+                !Array.isArray(state.assignments) || state.names.length > 50 ||
                 !state.names.every(name => typeof name === 'string' && name.length <= 60 &&
                     name.length > 0 && name === name.trim()) ||
                 new Set(state.names.map(name => name.toLocaleLowerCase())).size !== state.names.length) return false;
@@ -451,8 +451,8 @@
                 $('error').textContent = 'Escribe un nombre.';
             } else if (names.some(existing => existing.toLocaleLowerCase() === name.toLocaleLowerCase())) {
                 $('error').textContent = 'Ese nombre ya está en la lista. Usa nombres distintos.';
-            } else if (names.length >= 20) {
-                $('error').textContent = 'El máximo es de 20 participantes.';
+            } else if (names.length >= 50) {
+                $('error').textContent = 'El máximo es de 50 participantes.';
             } else {
                 if (!saveState({ names: [...names, name] })) return;
                 names.push(name);
