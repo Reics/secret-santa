@@ -52,6 +52,17 @@
         .full { width: 100%; margin-top: 12px; }
         .primary { background: #1b6b47; }
         .secondary { background: #70574b; }
+        .change-player { background: #e2efe5; color: #174b37; }
+        #adminBtn {
+            display: block;
+            min-height: 44px;
+            margin: 4px auto 0;
+            background: transparent;
+            color: #70574b;
+            font-size: 13px;
+            text-decoration: underline;
+        }
+        #adminBtn:disabled { color: #999; }
         .names {
             display: flex;
             flex-wrap: wrap;
@@ -183,9 +194,10 @@
         <div class="pointer"></div>
         <canvas id="wheel" width="400" height="400" aria-hidden="true"></canvas>
         <button id="spinBtn" class="full primary">Girar la ruleta</button>
+        <button id="changePlayerBtn" class="full change-player">Cambiar persona</button>
         <p id="progress" aria-live="polite"></p>
-        <button id="adminBtn" class="full">🔒 Asignaciones del administrador</button>
         <button id="resetBtn" class="full secondary">Empezar de nuevo</button>
+        <button id="adminBtn">🔒 Administración</button>
     </main>
 
     <div class="overlay" id="selectModal" hidden>
@@ -378,6 +390,12 @@
             showSelector();
         });
 
+        $('changePlayerBtn').addEventListener('click', () => {
+            currentPlayer = null;
+            $('turn').textContent = 'Elige quién girará la ruleta.';
+            showSelector();
+        });
+
         $('spinBtn').addEventListener('click', () => {
             if (spinning || currentPlayer === null) return;
             const players = names.filter(name => !completed.includes(name));
@@ -389,6 +407,7 @@
             pending = choices[Math.floor(Math.random() * choices.length)];
             spinning = true;
             $('spinBtn').disabled = true;
+            $('changePlayerBtn').disabled = true;
             $('resetBtn').disabled = true;
             $('adminBtn').disabled = true;
             const startAngle = angle;
@@ -427,10 +446,12 @@
             $('resultModal').hidden = true;
             $('resetBtn').disabled = false;
             $('adminBtn').disabled = false;
+            $('changePlayerBtn').disabled = false;
             updateProgress();
             if (completed.length === names.length) {
                 $('turn').textContent = '¡Todos participaron! El sorteo terminó.';
                 $('spinBtn').hidden = true;
+                $('changePlayerBtn').hidden = true;
                 $('resetBtn').focus();
             } else {
                 $('spinBtn').disabled = false;
@@ -554,6 +575,8 @@
             $('setup').hidden = false;
             $('spinBtn').hidden = false;
             $('spinBtn').disabled = false;
+            $('changePlayerBtn').hidden = false;
+            $('changePlayerBtn').disabled = false;
             $('startBtn').disabled = true;
             $('error').textContent = '';
             renderTags($('namesPreview'), names);
