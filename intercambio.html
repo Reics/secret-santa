@@ -11,14 +11,17 @@
             min-height: 100vh;
             padding: 20px;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
+            gap: 12px;
             font-family: 'Segoe UI', Tahoma, sans-serif;
             background:
                 radial-gradient(circle, rgba(255,255,255,.4) 1px, transparent 2px) 0 0 / 42px 42px,
                 radial-gradient(circle, rgba(255,255,255,.25) 1px, transparent 2px) 20px 24px / 56px 56px,
                 linear-gradient(135deg, #0c3028, #175b42);
         }
+        footer { color: #e4efe8; font-size: 13px; text-align: center; }
         .card {
             width: min(100%, 480px);
             padding: 24px;
@@ -236,6 +239,8 @@
         <button id="resetBtn" class="full secondary">Empezar de nuevo</button>
         <button id="adminBtn">🔒 Administración</button>
     </main>
+
+    <footer>© 2026 Reics</footer>
 
     <div class="overlay" id="selectModal" hidden>
         <section class="card" role="dialog" aria-modal="true" aria-labelledby="selectTitle">
