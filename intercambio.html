@@ -76,6 +76,63 @@
         }
         canvas { display: block; width: min(100%, 360px); height: auto; margin: auto; cursor: pointer; }
         .player-list { display: grid; gap: 8px; max-height: 50vh; overflow-y: auto; }
+        .diagram-viewport {
+            max-height: 55vh;
+            overflow: auto;
+            border: 1px solid #e6d3a5;
+            border-radius: 12px;
+            background: #fffdf6;
+        }
+        .diagram {
+            display: grid;
+            gap: 18px;
+            width: max-content;
+            min-width: 100%;
+            padding: 18px;
+        }
+        .garland { position: relative; display: flex; gap: 32px; width: max-content; }
+        .garland.connected::before {
+            content: '';
+            position: absolute;
+            top: 10px;
+            left: 50px;
+            right: 50px;
+            height: 4px;
+            background: #24543b;
+        }
+        .bulb {
+            position: relative;
+            flex: 0 0 100px;
+            width: 100px;
+            padding-top: 21px;
+        }
+        .bulb::before {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 38px;
+            width: 24px;
+            height: 20px;
+            border-radius: 4px;
+            background: repeating-linear-gradient(#566e59 0 4px, #324d3b 4px 6px);
+        }
+        .bulb-light {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px;
+            width: 100px;
+            height: 82px;
+            border: 2px solid rgba(95, 73, 34, .35);
+            border-radius: 45% 45% 50% 50% / 35% 35% 65% 65%;
+            background: var(--bulb-color);
+            box-shadow: inset 8px 5px 12px rgba(255,255,255,.55), 0 0 12px rgba(230,189,76,.35);
+            color: #263d30;
+            font-size: 12px;
+            font-weight: bold;
+            line-height: 1.1;
+            overflow-wrap: anywhere;
+        }
         .overlay {
             position: fixed;
             inset: 0;
@@ -113,7 +170,7 @@
         <canvas id="wheel" width="400" height="400" aria-hidden="true"></canvas>
         <button id="spinBtn" class="full primary">Girar la ruleta</button>
         <p id="progress" aria-live="polite"></p>
-        <div class="names" id="completed" aria-label="Ya participaron"></div>
+        <button id="adminBtn" class="full">🔒 Asignaciones del administrador</button>
         <button id="resetBtn" class="full secondary">Empezar de nuevo</button>
     </main>
 
@@ -134,24 +191,51 @@
         </section>
     </div>
 
+    <div class="overlay" id="adminModal" hidden>
+        <section class="card" role="dialog" aria-modal="true" aria-labelledby="adminTitle">
+            <h2 id="adminTitle">Asignaciones del administrador</h2>
+            <form id="adminForm">
+                <label for="adminCode">Clave de administrador</label>
+                <input id="adminCode" type="password" inputmode="numeric" maxlength="5" autocomplete="off" required>
+                <p class="error" id="adminError" role="alert"></p>
+                <button type="submit" class="full primary">Ver asignaciones</button>
+            </form>
+            <div id="adminResults" hidden>
+                <p id="garlandHint"></p>
+                <p>Desliza para ver todos los focos.</p>
+                <div class="diagram-viewport" tabindex="0" aria-label="Desplazar diagrama">
+                    <div class="diagram" id="assignmentDiagram" role="img"></div>
+                </div>
+                <p id="noAssignments" hidden>Aún no hay asignaciones confirmadas.</p>
+            </div>
+            <button id="adminClose" class="full secondary">Cerrar</button>
+        </section>
+    </div>
+
     <script>
         const names = [];
         let remaining = [];
         let completed = [];
+        let assignments = [];
         let currentPlayer = null;
         let pending = null;
         let spinning = false;
         let angle = 0;
-
         const $ = id => document.getElementById(id);
         const canvas = $('wheel');
         const ctx = canvas.getContext('2d');
-        function eligibleTargets(remaining, players, player) {
+        function eligibleTargets(remaining, players, player, assignments) {
+            const next = new Map(assignments.map(pair => [pair.player, pair.target]));
             return remaining.filter(target => {
                 if (target === player) return false;
-                if (remaining.length !== 2) return true;
-                const lastPlayer = players.find(name => name !== player);
-                return remaining.find(name => name !== target) !== lastPlayer;
+                if (players.length === 1) return true;
+                const seen = new Set([player]);
+                while (next.has(target)) {
+                    if (seen.has(target)) return false;
+                    seen.add(target);
+                    target = next.get(target);
+                }
+                return !seen.has(target);
             });
         }
 
@@ -272,6 +356,7 @@
         $('startBtn').addEventListener('click', () => {
             remaining = [...names];
             completed = [];
+            assignments = [];
             $('setup').hidden = true;
             $('game').hidden = false;
             updateProgress();
@@ -282,7 +367,7 @@
         $('spinBtn').addEventListener('click', () => {
             if (spinning || currentPlayer === null) return;
             const players = names.filter(name => !completed.includes(name));
-            const choices = eligibleTargets(remaining, players, currentPlayer);
+            const choices = eligibleTargets(remaining, players, currentPlayer, assignments);
             if (choices.length === 0) {
                 $('turn').textContent = 'No hay una asignación válida. Reinicia el sorteo.';
                 return;
@@ -291,6 +376,7 @@
             spinning = true;
             $('spinBtn').disabled = true;
             $('resetBtn').disabled = true;
+            $('adminBtn').disabled = true;
             const startAngle = angle;
             const distance = (5 + Math.random() * 3) * Math.PI * 2;
             const start = performance.now();
@@ -314,18 +400,19 @@
 
         function updateProgress() {
             $('progress').textContent = completed.length + ' de ' + names.length + ' participantes han girado.';
-            renderTags($('completed'), completed);
         }
 
         $('confirmBtn').addEventListener('click', () => {
             if (pending === null) return;
             remaining = remaining.filter(name => name !== pending);
             completed.push(currentPlayer);
+            assignments.push({ player: currentPlayer, target: pending });
             currentPlayer = null;
             pending = null;
             $('resultName').textContent = '';
             $('resultModal').hidden = true;
             $('resetBtn').disabled = false;
+            $('adminBtn').disabled = false;
             updateProgress();
             if (completed.length === names.length) {
                 $('turn').textContent = '¡Todos participaron! El sorteo terminó.';
@@ -337,11 +424,115 @@
             }
         });
 
+        $('adminBtn').addEventListener('click', () => {
+            $('adminForm').hidden = false;
+            $('adminResults').hidden = true;
+            $('adminCode').value = '';
+            $('adminError').textContent = '';
+            $('assignmentDiagram').replaceChildren();
+            $('adminModal').hidden = false;
+            $('adminCode').focus();
+        });
+
+        function assignmentChains(names, assignments) {
+            const next = new Map(assignments.map(pair => [pair.player, pair.target]));
+            const targets = new Set(assignments.map(pair => pair.target));
+            const starts = names.filter(name => !targets.has(name));
+            if (starts.length === 0 && names.length > 0) starts.push(names[0]);
+            const visited = new Set();
+            return starts.map(start => {
+                const chain = [];
+                let name = start;
+                while (name !== undefined && !visited.has(name)) {
+                    visited.add(name);
+                    chain.push(name);
+                    name = next.get(name);
+                }
+                return chain;
+            });
+        }
+
+        function drawAssignments() {
+            const diagram = $('assignmentDiagram');
+            diagram.setAttribute('aria-label', assignments.length
+                ? assignments.map(({ player, target }) => player + ' le regala a ' + target).join('. ')
+                : 'Aún no hay asignaciones confirmadas.');
+            diagram.replaceChildren();
+            const chains = assignmentChains(names, assignments);
+            const connected = chains.filter(chain => chain.length > 1);
+            const isolated = chains.filter(chain => chain.length === 1).flat();
+            if (isolated.length) connected.push(isolated);
+            const colors = ['#f5a3a6', '#a8dcb3', '#ffe28a', '#a8d8e6'];
+            connected.forEach(chain => {
+                const garland = document.createElement('div');
+                garland.className = 'garland' + (chain.length > 1 && chain !== isolated ? ' connected' : '');
+                garland.setAttribute('aria-hidden', 'true');
+                chain.forEach(name => {
+                    const bulb = document.createElement('div');
+                    bulb.className = 'bulb';
+                    const light = document.createElement('div');
+                    light.className = 'bulb-light';
+                    light.style.setProperty('--bulb-color', colors[names.indexOf(name) % colors.length]);
+                    light.style.fontSize = name.length > 40 ? '8px' : name.length > 25 ? '10px' : name.length > 12 ? '12px' : '15px';
+                    light.textContent = name;
+                    bulb.appendChild(light);
+                    garland.appendChild(bulb);
+                });
+                diagram.appendChild(garland);
+            });
+            $('garlandHint').textContent = assignments.length === names.length
+                ? 'De izquierda a derecha, cada persona le regala a la siguiente. La última le regala a la primera.'
+                : 'Los focos conectados indican quién le regala a la persona de su derecha. Los demás aún no están conectados.';
+            diagram.parentElement.scrollLeft = 0;
+            diagram.parentElement.scrollTop = 0;
+        }
+
+        $('adminForm').addEventListener('submit', async event => {
+            event.preventDefault();
+            if (!window.crypto || !window.crypto.subtle) {
+                $('adminError').textContent = 'Este navegador no permite verificar la clave al abrir el archivo.';
+                return;
+            }
+            const submit = $('adminForm').querySelector('button');
+            submit.disabled = true;
+            $('adminClose').disabled = true;
+            try {
+                const bytes = new TextEncoder().encode($('adminCode').value);
+                const digest = await crypto.subtle.digest('SHA-256', bytes);
+                const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+                if (hash !== 'e3ac5a4298fbd9d4eec431d0c0925837c2f9937e02774dcbbee20177e75da190') {
+                    $('adminError').textContent = 'Clave incorrecta.';
+                    $('adminCode').select();
+                    return;
+                }
+                $('noAssignments').hidden = assignments.length > 0;
+                $('adminCode').value = '';
+                $('adminForm').hidden = true;
+                $('adminResults').hidden = false;
+                drawAssignments();
+            } catch (error) {
+                $('adminError').textContent = 'No se pudo verificar la clave en este navegador.';
+                console.error('Error al verificar la clave:', error);
+            } finally {
+                submit.disabled = false;
+                $('adminClose').disabled = false;
+                if (!$('adminResults').hidden) $('adminClose').focus();
+            }
+        });
+
+        $('adminClose').addEventListener('click', () => {
+            $('adminModal').hidden = true;
+            $('adminCode').value = '';
+            $('assignmentDiagram').replaceChildren();
+            $('assignmentDiagram').removeAttribute('aria-label');
+            $('adminBtn').focus();
+        });
         $('resetBtn').addEventListener('click', () => {
             if (!confirm('¿Empezar de nuevo? Se perderá el sorteo actual.')) return;
             names.length = 0;
             remaining = [];
             completed = [];
+            assignments = [];
             currentPlayer = null;
             pending = null;
             angle = 0;
