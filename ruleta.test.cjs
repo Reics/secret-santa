@@ -74,3 +74,93 @@ const complete = [...partial, { player: 'Ceci', target: 'Beto' },
 assert.equal(Array.from(assignmentChains(names, complete), chain => chain.join(' → ')).join(' | '),
     'Ana → Ceci → Beto → Dani → Eva');
 console.log('Guirnalda correcta durante y después del sorteo.');
+
+const wheelSource = html.match(/function drawWheel\([\s\S]*?\r?\n        }\r?\n/);
+assert.ok(wheelSource, 'No se encontró la función de la ruleta');
+let rotation = 0;
+const stack = [];
+const rotations = [];
+const textRotations = [];
+const boxRotations = [];
+const ctx = {
+    save() { stack.push(rotation); },
+    restore() { rotation = stack.pop(); },
+    rotate(value) { rotation += value; rotations.push(value); },
+    fillText() { textRotations.push(rotation); },
+    fillRect() { boxRotations.push(rotation); },
+    clearRect() {}, translate() {}, beginPath() {}, arc() {}, fill() {}, stroke() {},
+    moveTo() {}, bezierCurveTo() {}
+};
+const drawWheel = vm.runInNewContext(`(${wheelSource[0]})`, {
+    ctx, canvas: { width: 400, height: 400 }, angle: 1.2
+});
+drawWheel(0);
+assert.equal(rotations[0], 1.2);
+assert.ok(textRotations.every(value => value === 0));
+assert.ok(boxRotations.every(value => value === 0));
+textRotations.length = 0;
+boxRotations.length = 0;
+drawWheel(1);
+assert.ok(textRotations.every(value => value === 0));
+assert.equal(boxRotations[0], 0);
+assert.ok(boxRotations.some(value => value !== 0));
+assert.equal(stack.length, 0);
+console.log('Solo gira el aro; el regalo se abre sin girar las letras.');
+
+const script = html.match(/<script>([\s\S]*?)<\/script>/);
+assert.ok(script, 'No se encontró el código de la página');
+function fakeElement() {
+    return {
+        hidden: false, disabled: false, textContent: '', style: {}, children: [], events: {},
+        addEventListener(type, handler) { this.events[type] = handler; },
+        appendChild(child) { this.children.push(child); },
+        replaceChildren(...children) { this.children = children; },
+        get firstElementChild() { return this.children[0]; },
+        focus() {}
+    };
+}
+const elements = new Map();
+function getElementById(id) {
+    if (!elements.has(id)) elements.set(id, fakeElement());
+    return elements.get(id);
+}
+const wheel = getElementById('wheel');
+wheel.width = wheel.height = 400;
+wheel.getContext = () => ctx;
+getElementById('confirmBtn').hidden = true;
+getElementById('wheelReveal').hidden = true;
+getElementById('selectModal').hidden = true;
+let frame;
+const page = vm.createContext({
+    document: { getElementById, createElement: fakeElement },
+    performance: { now: () => 0 },
+    requestAnimationFrame(callback) { frame = callback; }
+});
+vm.runInContext(script[1], page);
+vm.runInContext("names.push('Ana', 'Beto'); remaining = [...names]; currentPlayer = 'Ana';", page);
+
+function spinAndConfirm(expected) {
+    getElementById('spinBtn').events.click();
+    frame(3000);
+    assert.equal(getElementById('spinBtn').hidden, true);
+    assert.equal(getElementById('changePlayerBtn').hidden, true);
+    assert.equal(getElementById('confirmBtn').hidden, false);
+    assert.equal(getElementById('confirmBtn').disabled, true);
+    frame(3700);
+    assert.equal(getElementById('confirmBtn').disabled, false);
+    assert.equal(getElementById('wheelReveal').textContent, expected);
+    getElementById('confirmBtn').events.click();
+    assert.equal(getElementById('confirmBtn').hidden, true);
+    assert.equal(getElementById('wheelReveal').hidden, true);
+    assert.equal(getElementById('wheelReveal').textContent, '');
+}
+spinAndConfirm('Beto');
+assert.equal(getElementById('selectModal').hidden, false);
+assert.equal(getElementById('spinBtn').hidden, false);
+assert.equal(getElementById('changePlayerBtn').hidden, false);
+vm.runInContext("currentPlayer = 'Beto';", page);
+spinAndConfirm('Ana');
+assert.equal(getElementById('spinBtn').hidden, true);
+assert.equal(getElementById('changePlayerBtn').hidden, true);
+assert.equal(getElementById('progress').textContent, '2 de 2 participantes han girado.');
+console.log('La confirmación reemplaza los botones y restaura el siguiente turno.');
