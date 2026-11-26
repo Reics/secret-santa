@@ -145,13 +145,13 @@ assert.ok(script, 'No se encontró el código de la página');
 function fakeElement() {
     return {
         hidden: false, disabled: false, textContent: '', value: '', style: { setProperty() {} },
-        children: [], events: {}, parentElement: {},
+        children: [], events: {}, attributes: {}, parentElement: {},
         addEventListener(type, handler) { this.events[type] = handler; },
         click() { if (!this.disabled && this.events.click) this.events.click(); },
         appendChild(child) { this.children.push(child); },
         replaceChildren(...children) { this.children = children; },
         querySelector() { return this.button ??= fakeElement(); },
-        setAttribute() {},
+        setAttribute(name, value) { this.attributes[name] = value; },
         removeAttribute() {},
         get firstElementChild() { return this.children[0]; },
         focus() {},
@@ -229,7 +229,7 @@ assert.equal(getElementById('changePlayerBtn').hidden, true);
 assert.equal(getElementById('progress').textContent, '2 de 2 participantes han girado.');
 console.log('La confirmación reemplaza los botones y restaura el siguiente turno.');
 
-function reloadFrom(value) {
+function reloadFrom(value, crypto = require('node:crypto').webcrypto) {
     storedValue = value;
     const restored = new Map();
     function getRestored(id) {
@@ -246,8 +246,8 @@ function reloadFrom(value) {
     const reloadedPage = vm.createContext({
         document: { getElementById: getRestored, createElement: fakeElement },
         localStorage,
-        window: { crypto: require('node:crypto').webcrypto },
-        crypto: require('node:crypto').webcrypto,
+        window: { crypto },
+        crypto,
         TextEncoder,
         confirm: () => true,
         console: { error() {} },
@@ -289,6 +289,37 @@ assert.equal(invalidPage('storageAlert').hidden, false);
 assert.equal(invalidPage('discardSavedBtn').hidden, false);
 assert.equal(storedValue, invalidCycle);
 console.log('El progreso pendiente, parcial y final se restaura sin repetir giros.');
+
+{
+    const setup = reloadFrom(null);
+    for (const name of ['Ana', 'Beto', 'Ceci']) {
+        setup('nameInput').value = name;
+        setup('nameForm').events.submit({ preventDefault() {} });
+    }
+    const list = setup('namesPreview');
+    list.children[0].click();
+    assert.equal(list.children[0].attributes['aria-pressed'], 'true');
+    assert.equal(JSON.parse(storedValue).names.length, 3);
+    list.children[1].click();
+    assert.equal(list.children[0].attributes['aria-pressed'], 'false');
+    assert.equal(list.children[1].attributes['aria-pressed'], 'true');
+    list.children[1].click();
+    assert.deepEqual(JSON.parse(storedValue).names, ['Ana', 'Ceci']);
+    assert.equal(setup('startBtn').disabled, false);
+    assert.equal(reloadFrom(storedValue)('namesPreview').children.length, 2);
+
+    list.children[0].click();
+    failWrites = true;
+    list.children[0].click();
+    assert.equal(list.children.length, 2);
+    assert.deepEqual(JSON.parse(storedValue).names, ['Ana', 'Ceci']);
+    assert.equal(setup('storageAlert').hidden, false);
+    failWrites = false;
+    list.children[0].click();
+    assert.deepEqual(JSON.parse(storedValue).names, ['Ceci']);
+    assert.equal(setup('startBtn').disabled, true);
+    console.log('Los participantes se seleccionan y eliminan en dos pulsaciones, con guardado seguro.');
+}
 
 (async () => {
     const setup = reloadFrom(null);
@@ -333,6 +364,24 @@ console.log('El progreso pendiente, parcial y final se restaura sin repetir giro
     assert.equal(reloadFrom(storedValue)('adminBtn').hidden, true);
     assert.equal(reloadFrom(completedSnapshot)('adminBtn').hidden, true);
     console.log('El acceso opcional usa el código elegido y se restaura correctamente.');
+
+    let finishHash;
+    const slowCrypto = { subtle: { digest: () => new Promise(resolve => { finishHash = resolve; }) } };
+    const racing = reloadFrom(null, slowCrypto);
+    for (const name of ['Ana', 'Beto']) {
+        racing('nameInput').value = name;
+        racing('nameForm').events.submit({ preventDefault() {} });
+    }
+    racing('saveChain').checked = true;
+    racing('setupCode').value = '1234';
+    const start = racing('startBtn').events.click();
+    racing('namesPreview').children[0].click();
+    racing('namesPreview').children[0].click();
+    finishHash(new Uint8Array(32).buffer);
+    await start;
+    assert.equal(racing('game').hidden, true);
+    assert.equal(racing('startBtn').disabled, true);
+    assert.equal(JSON.parse(storedValue).started, false);
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

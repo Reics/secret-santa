@@ -99,6 +99,7 @@
             overflow-y: auto;
         }
         .tag { background: #e2efe5; color: #174b37; padding: 6px 10px; border-radius: 16px; overflow-wrap: anywhere; }
+        .tag[aria-pressed="true"] { background: #a92332; color: white; }
         .error { color: #b91c1c; min-height: 1.4em; margin: 8px 0 0; }
         .storage-alert {
             position: fixed;
@@ -244,6 +245,7 @@
             <button type="submit" class="full">+ Agregar</button>
         </form>
         <p class="error" id="error" role="alert"></p>
+        <p>Selecciona un participante y vuelve a pulsarlo para eliminarlo.</p>
         <div class="names" id="namesPreview" aria-label="Participantes"></div>
         <label class="save-option">
             <input id="saveChain" type="checkbox" role="switch" aria-controls="setupCodeContainer">
@@ -311,6 +313,8 @@
         let currentPlayer = null;
         let pending = null;
         let started = false;
+        let starting = false;
+        let selectedName = null;
         let adminHash = null;
         let spinning = false;
         let angle = 0;
@@ -476,9 +480,26 @@
         function renderTags(container, values) {
             container.replaceChildren();
             values.forEach(name => {
-                const tag = document.createElement('span');
+                const tag = document.createElement('button');
+                tag.type = 'button';
                 tag.className = 'tag';
                 tag.textContent = name;
+                tag.setAttribute('aria-pressed', String(name === selectedName));
+                tag.addEventListener('click', () => {
+                    if (selectedName === name) {
+                        if (!saveState({ names: names.filter(value => value !== name) })) return;
+                        names.splice(names.indexOf(name), 1);
+                        selectedName = null;
+                        $('error').textContent = '';
+                        $('startBtn').disabled = starting || names.length < 2;
+                        renderTags(container, values);
+                        $('nameInput').focus();
+                    } else {
+                        selectedName = name;
+                        renderTags(container, values);
+                        container.children[names.indexOf(name)].focus();
+                    }
+                });
                 container.appendChild(tag);
             });
         }
@@ -499,7 +520,7 @@
                 input.value = '';
                 $('error').textContent = '';
                 renderTags($('namesPreview'), names);
-                $('startBtn').disabled = names.length < 2;
+                $('startBtn').disabled = starting || names.length < 2;
             }
             input.focus();
         });
@@ -535,6 +556,7 @@
         }
 
         $('startBtn').addEventListener('click', async () => {
+            if (starting) return;
             const enabled = $('saveChain').checked;
             const code = $('setupCode').value;
             if (enabled && !/^[0-9]{4}$/.test(code)) {
@@ -542,6 +564,7 @@
                 $('setupCode').focus();
                 return;
             }
+            starting = true;
             $('startBtn').disabled = true;
             let nextHash = null;
             if (enabled) {
@@ -550,14 +573,22 @@
                 } catch (error) {
                     console.error('Error al guardar el código:', error);
                     $('error').textContent = 'No se pudo guardar el código en este navegador.';
-                    $('startBtn').disabled = false;
+                    starting = false;
+                    $('startBtn').disabled = names.length < 2;
                     return;
                 }
             }
-            if (!saveState({ started: true, adminHash: nextHash })) {
-                $('startBtn').disabled = false;
+            if (names.length < 2) {
+                starting = false;
+                $('error').textContent = 'Agrega al menos 2 participantes.';
                 return;
             }
+            if (!saveState({ started: true, adminHash: nextHash })) {
+                starting = false;
+                $('startBtn').disabled = names.length < 2;
+                return;
+            }
+            starting = false;
             adminHash = nextHash;
             $('setupCode').value = '';
             $('error').textContent = '';
@@ -772,6 +803,7 @@
             if (!saveState({ started: false, names: [], assignments: [], currentPlayer: null, pending: null, adminHash: null })) return;
             names.length = 0;
             started = false;
+            selectedName = null;
             adminHash = null;
             remaining = [];
             completed = [];
