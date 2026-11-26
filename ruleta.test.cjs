@@ -144,13 +144,18 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/);
 assert.ok(script, 'No se encontró el código de la página');
 function fakeElement() {
     return {
-        hidden: false, disabled: false, textContent: '', style: {}, children: [], events: {},
+        hidden: false, disabled: false, textContent: '', value: '', style: { setProperty() {} },
+        children: [], events: {}, parentElement: {},
         addEventListener(type, handler) { this.events[type] = handler; },
         click() { if (!this.disabled && this.events.click) this.events.click(); },
         appendChild(child) { this.children.push(child); },
         replaceChildren(...children) { this.children = children; },
+        querySelector() { return this.button ??= fakeElement(); },
+        setAttribute() {},
+        removeAttribute() {},
         get firstElementChild() { return this.children[0]; },
-        focus() {}
+        focus() {},
+        select() {}
     };
 }
 const elements = new Map();
@@ -234,12 +239,17 @@ function reloadFrom(value) {
     const restoredWheel = getRestored('wheel');
     restoredWheel.width = restoredWheel.height = 400;
     restoredWheel.getContext = () => ctx;
-    for (const id of ['game', 'confirmBtn', 'wheelReveal', 'selectModal', 'storageAlert', 'discardSavedBtn']) {
+    for (const id of ['game', 'confirmBtn', 'wheelReveal', 'selectModal', 'storageAlert', 'discardSavedBtn',
+        'adminBtn', 'setupCodeContainer', 'adminResults']) {
         getRestored(id).hidden = true;
     }
     const reloadedPage = vm.createContext({
         document: { getElementById: getRestored, createElement: fakeElement },
         localStorage,
+        window: { crypto: require('node:crypto').webcrypto },
+        crypto: require('node:crypto').webcrypto,
+        TextEncoder,
+        confirm: () => true,
         console: { error() {} },
         performance: { now: () => 0 },
         requestAnimationFrame() { throw new Error('No debe girar al restaurar'); }
@@ -279,3 +289,51 @@ assert.equal(invalidPage('storageAlert').hidden, false);
 assert.equal(invalidPage('discardSavedBtn').hidden, false);
 assert.equal(storedValue, invalidCycle);
 console.log('El progreso pendiente, parcial y final se restaura sin repetir giros.');
+
+(async () => {
+    const setup = reloadFrom(null);
+    for (const name of ['Ana', 'Beto']) {
+        setup('nameInput').value = name;
+        setup('nameForm').events.submit({ preventDefault() {} });
+    }
+    setup('saveChain').checked = true;
+    setup('saveChain').events.change();
+    assert.equal(setup('setupCodeContainer').hidden, false);
+    setup('setupCode').value = '123';
+    await setup('startBtn').events.click();
+    assert.equal(setup('game').hidden, true);
+    assert.match(setup('error').textContent, /4 dígitos/);
+    setup('setupCode').value = '0123';
+    await setup('startBtn').events.click();
+    assert.equal(setup('adminBtn').hidden, false);
+    const saved = storedValue;
+    assert.match(JSON.parse(saved).adminHash, /^[0-9a-f]{64}$/);
+    assert.notEqual(JSON.parse(saved).adminHash, '0123');
+
+    const restored = reloadFrom(saved);
+    assert.equal(restored('adminBtn').hidden, false);
+    restored('adminBtn').events.click();
+    restored('adminCode').value = '1234';
+    await restored('adminForm').events.submit({ preventDefault() {} });
+    assert.equal(restored('adminError').textContent, 'Clave incorrecta.');
+    restored('adminCode').value = '0123';
+    await restored('adminForm').events.submit({ preventDefault() {} });
+    assert.equal(restored('adminResults').hidden, false);
+    restored('resetBtn').events.click();
+    assert.equal(restored('adminBtn').hidden, true);
+    assert.equal(JSON.parse(storedValue).adminHash, null);
+
+    const noAdmin = reloadFrom(null);
+    for (const name of ['Ana', 'Beto']) {
+        noAdmin('nameInput').value = name;
+        noAdmin('nameForm').events.submit({ preventDefault() {} });
+    }
+    await noAdmin('startBtn').events.click();
+    assert.equal(noAdmin('adminBtn').hidden, true);
+    assert.equal(reloadFrom(storedValue)('adminBtn').hidden, true);
+    assert.equal(reloadFrom(completedSnapshot)('adminBtn').hidden, true);
+    console.log('El acceso opcional usa el código elegido y se restaura correctamente.');
+})().catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+});

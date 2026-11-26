@@ -56,6 +56,30 @@
         .primary { background: #1b6b47; }
         .secondary { background: #70574b; }
         .change-player { background: #e2efe5; color: #174b37; }
+        .save-option { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .save-option input {
+            appearance: none;
+            flex: 0 0 46px;
+            width: 46px;
+            height: 26px;
+            padding: 2px;
+            border: 0;
+            border-radius: 13px;
+            background: #888;
+            cursor: pointer;
+        }
+        .save-option input::before {
+            content: '';
+            display: block;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: white;
+            transition: transform .2s;
+        }
+        .save-option input:checked { background: #1b6b47; }
+        .save-option input:checked::before { transform: translateX(20px); }
+        #setupCodeContainer { margin-top: 12px; }
         #adminBtn {
             display: block;
             min-height: 44px;
@@ -221,6 +245,14 @@
         </form>
         <p class="error" id="error" role="alert"></p>
         <div class="names" id="namesPreview" aria-label="Participantes"></div>
+        <label class="save-option">
+            <input id="saveChain" type="checkbox" role="switch" aria-controls="setupCodeContainer">
+            Guardar cadena de regalos
+        </label>
+        <div id="setupCodeContainer" hidden>
+            <label for="setupCode">Código de administrador de 4 dígitos</label>
+            <input id="setupCode" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off">
+        </div>
         <button id="startBtn" class="full primary" disabled>Comenzar</button>
     </main>
 
@@ -237,7 +269,7 @@
         <button id="confirmBtn" class="full primary" hidden>Ya lo vi</button>
         <p id="progress" aria-live="polite"></p>
         <button id="resetBtn" class="full secondary">Empezar de nuevo</button>
-        <button id="adminBtn">🔒 Administración</button>
+        <button id="adminBtn" hidden>🔒Cadena de Regalos</button>
     </main>
 
     <footer>© 2026 Reics · v1.0</footer>
@@ -255,7 +287,7 @@
             <h2 id="adminTitle">Asignaciones del administrador</h2>
             <form id="adminForm">
                 <label for="adminCode">Clave de administrador</label>
-                <input id="adminCode" type="password" inputmode="numeric" maxlength="5" autocomplete="off" required>
+                <input id="adminCode" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" required>
                 <p class="error" id="adminError" role="alert"></p>
                 <button type="submit" class="full primary">Ver asignaciones</button>
             </form>
@@ -279,6 +311,7 @@
         let currentPlayer = null;
         let pending = null;
         let started = false;
+        let adminHash = null;
         let spinning = false;
         let angle = 0;
         const storageKey = 'santa-secreto-ruleta-v1';
@@ -315,7 +348,7 @@
                     showStorageError('El sorteo cambió en otra pestaña. Recarga esta página para recuperar el progreso.');
                     return false;
                 }
-                const state = { version: 1, started, names, assignments, currentPlayer, pending, ...changes };
+                const state = { version: 1, started, names, assignments, currentPlayer, pending, adminHash, ...changes };
                 const value = JSON.stringify(state);
                 localStorage.setItem(storageKey, value);
                 savedValue = value;
@@ -334,9 +367,11 @@
                 !Array.isArray(state.assignments) || state.names.length > 50 ||
                 !state.names.every(name => typeof name === 'string' && name.length <= 60 &&
                     name.length > 0 && name === name.trim()) ||
-                new Set(state.names.map(name => name.toLocaleLowerCase())).size !== state.names.length) return false;
+                new Set(state.names.map(name => name.toLocaleLowerCase())).size !== state.names.length ||
+                (state.adminHash != null && (typeof state.adminHash !== 'string' || !/^[0-9a-f]{64}$/.test(state.adminHash)))) return false;
             if (!state.started) {
-                return state.assignments.length === 0 && state.currentPlayer === null && state.pending === null;
+                return state.assignments.length === 0 && state.currentPlayer === null && state.pending === null &&
+                    state.adminHash == null;
             }
             if (state.names.length < 2) return false;
             let available = [...state.names];
@@ -489,8 +524,44 @@
             list.firstElementChild.focus();
         }
 
-        $('startBtn').addEventListener('click', () => {
-            if (!saveState({ started: true })) return;
+        $('saveChain').addEventListener('change', () => {
+            $('setupCodeContainer').hidden = !$('saveChain').checked;
+            if (!$('saveChain').checked) $('setupCode').value = '';
+        });
+
+        async function hashCode(code) {
+            const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
+            return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+        }
+
+        $('startBtn').addEventListener('click', async () => {
+            const enabled = $('saveChain').checked;
+            const code = $('setupCode').value;
+            if (enabled && !/^[0-9]{4}$/.test(code)) {
+                $('error').textContent = 'Escribe un código de 4 dígitos.';
+                $('setupCode').focus();
+                return;
+            }
+            $('startBtn').disabled = true;
+            let nextHash = null;
+            if (enabled) {
+                try {
+                    nextHash = await hashCode(code);
+                } catch (error) {
+                    console.error('Error al guardar el código:', error);
+                    $('error').textContent = 'No se pudo guardar el código en este navegador.';
+                    $('startBtn').disabled = false;
+                    return;
+                }
+            }
+            if (!saveState({ started: true, adminHash: nextHash })) {
+                $('startBtn').disabled = false;
+                return;
+            }
+            adminHash = nextHash;
+            $('setupCode').value = '';
+            $('error').textContent = '';
+            $('adminBtn').hidden = adminHash === null;
             started = true;
             remaining = [...names];
             completed = [];
@@ -668,10 +739,8 @@
             submit.disabled = true;
             $('adminClose').disabled = true;
             try {
-                const bytes = new TextEncoder().encode($('adminCode').value);
-                const digest = await crypto.subtle.digest('SHA-256', bytes);
-                const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-                if (hash !== 'e3ac5a4298fbd9d4eec431d0c0925837c2f9937e02774dcbbee20177e75da190') {
+                const hash = await hashCode($('adminCode').value);
+                if (adminHash === null || hash !== adminHash) {
                     $('adminError').textContent = 'Clave incorrecta.';
                     $('adminCode').select();
                     return;
@@ -700,9 +769,10 @@
         });
         $('resetBtn').addEventListener('click', () => {
             if (!confirm('¿Empezar de nuevo? Se perderá el sorteo actual.')) return;
-            if (!saveState({ started: false, names: [], assignments: [], currentPlayer: null, pending: null })) return;
+            if (!saveState({ started: false, names: [], assignments: [], currentPlayer: null, pending: null, adminHash: null })) return;
             names.length = 0;
             started = false;
+            adminHash = null;
             remaining = [];
             completed = [];
             assignments = [];
@@ -718,6 +788,10 @@
             $('confirmBtn').hidden = true;
             $('confirmBtn').disabled = false;
             $('startBtn').disabled = true;
+            $('adminBtn').hidden = true;
+            $('saveChain').checked = false;
+            $('setupCodeContainer').hidden = true;
+            $('setupCode').value = '';
             $('error').textContent = '';
             renderTags($('namesPreview'), names);
             $('nameInput').value = '';
@@ -771,6 +845,7 @@
             names.push(...state.names);
             assignments = state.assignments;
             started = state.started;
+            adminHash = state.adminHash ?? null;
             currentPlayer = state.currentPlayer;
             pending = state.pending;
             if (!started) {
@@ -782,6 +857,7 @@
             remaining = names.filter(name => !assignments.some(pair => pair.target === name));
             $('setup').hidden = true;
             $('game').hidden = false;
+            $('adminBtn').hidden = adminHash === null;
             updateProgress();
             if (completed.length === names.length) {
                 $('turn').textContent = '¡Todos participaron! El sorteo terminó.';
