@@ -80,7 +80,7 @@
         .save-option input:checked { background: #1b6b47; }
         .save-option input:checked::before { transform: translateX(20px); }
         #setupCodeContainer { margin-top: 12px; }
-        #adminBtn {
+        #adminBtn, #clearNamesBtn {
             display: block;
             min-height: 44px;
             margin: 4px auto 0;
@@ -247,6 +247,7 @@
         <p class="error" id="error" role="alert"></p>
         <p>Selecciona un participante y vuelve a pulsarlo para eliminarlo.</p>
         <div class="names" id="namesPreview" aria-label="Participantes"></div>
+        <button id="clearNamesBtn" type="button" hidden>Limpiar lista de participantes</button>
         <label class="save-option">
             <input id="saveChain" type="checkbox" role="switch" aria-controls="setupCodeContainer">
             Guardar cadena de regalos
@@ -487,6 +488,7 @@
 
         function renderTags(container, values) {
             container.replaceChildren();
+            $('clearNamesBtn').hidden = values.length === 0;
             values.forEach(name => {
                 const tag = document.createElement('button');
                 tag.type = 'button';
@@ -531,6 +533,17 @@
                 $('startBtn').disabled = starting || names.length < 2;
             }
             input.focus();
+        });
+
+        $('clearNamesBtn').addEventListener('click', () => {
+            if (!names.length || !confirm('¿Limpiar la lista de participantes?')) return;
+            if (!saveState({ names: [] })) return;
+            names.length = 0;
+            selectedName = null;
+            $('startBtn').disabled = true;
+            $('error').textContent = '';
+            renderTags($('namesPreview'), names);
+            $('nameInput').focus();
         });
 
         function showSelector() {
@@ -832,9 +845,8 @@
             $('adminBtn').focus();
         });
         $('resetBtn').addEventListener('click', () => {
-            if (!confirm('¿Empezar de nuevo? Se perderá el sorteo actual.')) return;
-            if (!saveState({ started: false, names: [], assignments: [], currentPlayer: null, pending: null, adminHash: null, allowReroll: true })) return;
-            names.length = 0;
+            if (!confirm('¿Empezar de nuevo? Se perderá el sorteo actual, pero se conservarán los participantes.')) return;
+            if (!saveState({ started: false, assignments: [], currentPlayer: null, pending: null, adminHash: null, allowReroll: true })) return;
             started = false;
             selectedName = null;
             adminHash = null;
@@ -856,7 +868,7 @@
             $('confirmBtn').disabled = false;
             $('rerollBtn').hidden = true;
             $('rerollBtn').disabled = false;
-            $('startBtn').disabled = true;
+            $('startBtn').disabled = names.length < 2;
             $('adminBtn').hidden = true;
             $('saveChain').checked = false;
             $('allowReroll').checked = true;

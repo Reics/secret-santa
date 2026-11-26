@@ -177,6 +177,7 @@ getElementById('selectModal').hidden = true;
 let frame;
 let storedValue = null;
 let failWrites = false;
+let confirmResult = true;
 const localStorage = {
     getItem() { return storedValue; },
     setItem(key, value) {
@@ -267,7 +268,7 @@ function reloadFrom(value, crypto = require('node:crypto').webcrypto, math = Mat
     restoredWheel.width = restoredWheel.height = 400;
     restoredWheel.getContext = () => ctx;
     for (const id of ['game', 'confirmBtn', 'rerollBtn', 'wheelReveal', 'selectModal', 'storageAlert', 'discardSavedBtn',
-        'adminBtn', 'setupCodeContainer', 'adminResults']) {
+        'adminBtn', 'setupCodeContainer', 'adminResults', 'clearNamesBtn']) {
         getRestored(id).hidden = true;
     }
     const reloadedPage = vm.createContext({
@@ -277,7 +278,7 @@ function reloadFrom(value, crypto = require('node:crypto').webcrypto, math = Mat
         crypto,
         Math: math,
         TextEncoder,
-        confirm: () => true,
+        confirm: () => confirmResult,
         console: { error() {} },
         performance: { now: () => 0 },
         requestAnimationFrame(callback) { frame = callback; }
@@ -488,6 +489,44 @@ console.log('El progreso pendiente, parcial y final se restaura sin repetir giro
     assert.equal(JSON.parse(storedValue).allowReroll, true);
     assert.equal(reloadFrom(completedSnapshot)('allowReroll').checked, true);
     console.log('La opción de volver a girar se guarda y respeta al restaurar.');
+
+    const restart = reloadFrom(completedSnapshot);
+    failWrites = true;
+    restart('resetBtn').events.click();
+    assert.equal(storedValue, completedSnapshot);
+    assert.equal(restart('game').hidden, false);
+    assert.equal(restart('storageAlert').hidden, false);
+    failWrites = false;
+    restart('resetBtn').events.click();
+    assert.deepEqual(JSON.parse(storedValue).names, ['Ana', 'Beto']);
+    assert.deepEqual(JSON.parse(storedValue).assignments, []);
+    assert.equal(JSON.parse(storedValue).started, false);
+    assert.equal(restart('startBtn').disabled, false);
+    assert.equal(restart('clearNamesBtn').hidden, false);
+    const preserved = reloadFrom(storedValue);
+    assert.equal(preserved('namesPreview').children.length, 2);
+    confirmResult = false;
+    preserved('clearNamesBtn').click();
+    assert.equal(preserved('namesPreview').children.length, 2);
+    confirmResult = true;
+    failWrites = true;
+    preserved('clearNamesBtn').click();
+    assert.equal(preserved('namesPreview').children.length, 2);
+    assert.deepEqual(JSON.parse(storedValue).names, ['Ana', 'Beto']);
+    failWrites = false;
+    preserved('clearNamesBtn').click();
+    assert.deepEqual(JSON.parse(storedValue).names, []);
+    assert.equal(preserved('startBtn').disabled, true);
+    assert.equal(preserved('clearNamesBtn').hidden, true);
+    assert.equal(reloadFrom(storedValue)('namesPreview').children.length, 0);
+
+    const reuse = reloadFrom(completedSnapshot);
+    reuse('resetBtn').click();
+    await reuse('startBtn').events.click();
+    assert.equal(JSON.parse(storedValue).started, true);
+    assert.deepEqual(JSON.parse(storedValue).names, ['Ana', 'Beto']);
+    assert.equal(reuse('playerList').children.length, 2);
+    console.log('Reiniciar conserva participantes; limpiar la lista requiere confirmación.');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;
