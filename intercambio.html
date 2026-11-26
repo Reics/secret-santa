@@ -56,7 +56,7 @@
         .primary { background: #1b6b47; }
         .secondary { background: #70574b; }
         .change-player { background: #e2efe5; color: #174b37; }
-        .save-option { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+        .save-option { display: flex; align-items: center; gap: 10px; margin-top: 12px; cursor: pointer; }
         .save-option input {
             appearance: none;
             flex: 0 0 46px;
@@ -255,6 +255,10 @@
             <label for="setupCode">Código de administrador de 4 dígitos</label>
             <input id="setupCode" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off">
         </div>
+        <label class="save-option">
+            <input id="allowReroll" type="checkbox" role="switch" checked>
+            Permitir volver a girar
+        </label>
         <button id="startBtn" class="full primary" disabled>Comenzar</button>
     </main>
 
@@ -318,6 +322,7 @@
         let starting = false;
         let selectedName = null;
         let adminHash = null;
+        let allowReroll = true;
         let spinning = false;
         let angle = 0;
         const storageKey = 'santa-secreto-ruleta-v1';
@@ -354,7 +359,7 @@
                     showStorageError('El sorteo cambió en otra pestaña. Recarga esta página para recuperar el progreso.');
                     return false;
                 }
-                const state = { version: 1, started, names, assignments, currentPlayer, pending, adminHash, ...changes };
+                const state = { version: 1, started, names, assignments, currentPlayer, pending, adminHash, allowReroll, ...changes };
                 const value = JSON.stringify(state);
                 localStorage.setItem(storageKey, value);
                 savedValue = value;
@@ -374,7 +379,8 @@
                 !state.names.every(name => typeof name === 'string' && name.length <= 60 &&
                     name.length > 0 && name === name.trim()) ||
                 new Set(state.names.map(name => name.toLocaleLowerCase())).size !== state.names.length ||
-                (state.adminHash != null && (typeof state.adminHash !== 'string' || !/^[0-9a-f]{64}$/.test(state.adminHash)))) return false;
+                (state.adminHash != null && (typeof state.adminHash !== 'string' || !/^[0-9a-f]{64}$/.test(state.adminHash))) ||
+                (state.allowReroll !== undefined && typeof state.allowReroll !== 'boolean')) return false;
             if (!state.started) {
                 return state.assignments.length === 0 && state.currentPlayer === null && state.pending === null &&
                     state.adminHash == null;
@@ -552,6 +558,14 @@
             if (!$('saveChain').checked) $('setupCode').value = '';
         });
 
+        $('allowReroll').addEventListener('change', () => {
+            if (!saveState({ allowReroll: $('allowReroll').checked })) {
+                $('allowReroll').checked = allowReroll;
+                return;
+            }
+            allowReroll = $('allowReroll').checked;
+        });
+
         async function hashCode(code) {
             const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
             return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -650,7 +664,7 @@
                     $('changePlayerBtn').hidden = true;
                     $('confirmBtn').hidden = false;
                     $('confirmBtn').disabled = true;
-                    $('rerollBtn').hidden = false;
+                    $('rerollBtn').hidden = !allowReroll;
                     $('rerollBtn').disabled = true;
                     function openGift(time) {
                         const opening = Math.min((time - revealStart) / 700, 1);
@@ -819,11 +833,12 @@
         });
         $('resetBtn').addEventListener('click', () => {
             if (!confirm('¿Empezar de nuevo? Se perderá el sorteo actual.')) return;
-            if (!saveState({ started: false, names: [], assignments: [], currentPlayer: null, pending: null, adminHash: null })) return;
+            if (!saveState({ started: false, names: [], assignments: [], currentPlayer: null, pending: null, adminHash: null, allowReroll: true })) return;
             names.length = 0;
             started = false;
             selectedName = null;
             adminHash = null;
+            allowReroll = true;
             remaining = [];
             completed = [];
             assignments = [];
@@ -844,6 +859,7 @@
             $('startBtn').disabled = true;
             $('adminBtn').hidden = true;
             $('saveChain').checked = false;
+            $('allowReroll').checked = true;
             $('setupCodeContainer').hidden = true;
             $('setupCode').value = '';
             $('error').textContent = '';
@@ -900,6 +916,8 @@
             assignments = state.assignments;
             started = state.started;
             adminHash = state.adminHash ?? null;
+            allowReroll = state.allowReroll ?? true;
+            $('allowReroll').checked = allowReroll;
             currentPlayer = state.currentPlayer;
             pending = state.pending;
             restoredPending = pending !== null;
@@ -930,7 +948,7 @@
                 $('adminBtn').disabled = true;
                 $('confirmBtn').hidden = false;
                 $('confirmBtn').disabled = false;
-                $('rerollBtn').hidden = false;
+                $('rerollBtn').hidden = !allowReroll;
                 $('rerollBtn').disabled = false;
                 drawWheel(1);
                 showReveal(1);

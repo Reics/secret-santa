@@ -142,6 +142,7 @@ console.log('Solo gira el aro; el regalo se abre sin girar las letras.');
 
 const script = html.match(/<script>([\s\S]*?)<\/script>/);
 assert.ok(script, 'No se encontró el código de la página');
+assert.match(html, /<input id="allowReroll"[^>]*\bchecked\b/);
 function fakeElement() {
     return {
         hidden: false, disabled: false, textContent: '', value: '', style: { setProperty() {} },
@@ -160,7 +161,11 @@ function fakeElement() {
 }
 const elements = new Map();
 function getElementById(id) {
-    if (!elements.has(id)) elements.set(id, fakeElement());
+    if (!elements.has(id)) {
+        const element = fakeElement();
+        if (id === 'allowReroll') element.checked = true;
+        elements.set(id, element);
+    }
     return elements.get(id);
 }
 const wheel = getElementById('wheel');
@@ -251,7 +256,11 @@ function reloadFrom(value, crypto = require('node:crypto').webcrypto, math = Mat
     storedValue = value;
     const restored = new Map();
     function getRestored(id) {
-        if (!restored.has(id)) restored.set(id, fakeElement());
+        if (!restored.has(id)) {
+            const element = fakeElement();
+            if (id === 'allowReroll') element.checked = true;
+            restored.set(id, element);
+        }
         return restored.get(id);
     }
     const restoredWheel = getRestored('wheel');
@@ -436,6 +445,49 @@ console.log('El progreso pendiente, parcial y final se restaura sin repetir giro
     assert.equal(racing('game').hidden, true);
     assert.equal(racing('startBtn').disabled, true);
     assert.equal(JSON.parse(storedValue).started, false);
+
+    const options = reloadFrom(null);
+    assert.equal(options('allowReroll').checked, true);
+    options('allowReroll').checked = false;
+    failWrites = true;
+    options('allowReroll').events.change();
+    assert.equal(options('allowReroll').checked, true);
+    assert.equal(options('storageAlert').hidden, false);
+    failWrites = false;
+    options('allowReroll').checked = false;
+    options('allowReroll').events.change();
+    assert.equal(JSON.parse(storedValue).allowReroll, false);
+    const savedOptions = reloadFrom(storedValue);
+    assert.equal(savedOptions('allowReroll').checked, false);
+    for (const name of ['Ana', 'Beto']) {
+        savedOptions('nameInput').value = name;
+        savedOptions('nameForm').events.submit({ preventDefault() {} });
+    }
+    await savedOptions('startBtn').events.click();
+    savedOptions('playerList').children[0].click();
+    const gameWithoutReroll = storedValue;
+    savedOptions('spinBtn').click();
+    frame(3000);
+    frame(3700);
+    assert.equal(savedOptions('rerollBtn').hidden, true);
+    assert.equal(savedOptions('confirmBtn').hidden, false);
+    assert.equal(storedValue, gameWithoutReroll);
+    savedOptions('confirmBtn').click();
+    assert.equal(JSON.parse(storedValue).assignments.length, 1);
+    assert.equal(JSON.parse(storedValue).allowReroll, false);
+    const legacyPending = JSON.stringify({ ...JSON.parse(pendingSnapshot), allowReroll: false });
+    assert.equal(reloadFrom(legacyPending)('rerollBtn').hidden, true);
+    const restoredGame = reloadFrom(gameWithoutReroll);
+    restoredGame('spinBtn').click();
+    frame(3000);
+    frame(3700);
+    assert.equal(restoredGame('rerollBtn').hidden, true);
+    restoredGame('confirmBtn').click();
+    restoredGame('resetBtn').events.click();
+    assert.equal(restoredGame('allowReroll').checked, true);
+    assert.equal(JSON.parse(storedValue).allowReroll, true);
+    assert.equal(reloadFrom(completedSnapshot)('allowReroll').checked, true);
+    console.log('La opción de volver a girar se guarda y respeta al restaurar.');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;
