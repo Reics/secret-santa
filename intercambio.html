@@ -238,7 +238,7 @@
     <main class="card" id="setup">
         <h1>🎉 Santa secreto</h1>
         <p>Agrega de 2 a 50 participantes y pasa este teléfono para que cada persona gire la ruleta.</p>
-        <p>El progreso se guarda en este navegador y teléfono. No uses navegación privada ni borres los datos del navegador.</p>
+        <p>El progreso se guarda en este navegador y teléfono al pulsar «Ya lo vi». No uses navegación privada ni borres los datos del navegador.</p>
         <form id="nameForm">
             <label for="nameInput">Nombre del participante</label>
             <input id="nameInput" type="text" maxlength="60" autocomplete="off" placeholder="Nombre...">
@@ -269,6 +269,7 @@
         <button id="spinBtn" class="full primary">Girar la ruleta</button>
         <button id="changePlayerBtn" class="full change-player">Cambiar persona</button>
         <button id="confirmBtn" class="full primary" hidden>Ya lo vi</button>
+        <button id="rerollBtn" class="full secondary" hidden>Volver a girar</button>
         <p id="progress" aria-live="polite"></p>
         <button id="resetBtn" class="full secondary">Empezar de nuevo</button>
         <button id="adminBtn" hidden>🔒Cadena de Regalos</button>
@@ -312,6 +313,7 @@
         let assignments = [];
         let currentPlayer = null;
         let pending = null;
+        let restoredPending = false;
         let started = false;
         let starting = false;
         let selectedName = null;
@@ -611,7 +613,7 @@
             showSelector();
         });
 
-        $('spinBtn').addEventListener('click', () => {
+        function spin() {
             if (spinning || currentPlayer === null || pending !== null) return;
             const players = names.filter(name => !completed.includes(name));
             const choices = eligibleTargets(remaining, players, currentPlayer, assignments);
@@ -620,9 +622,13 @@
                 return;
             }
             const target = choices[Math.floor(Math.random() * choices.length)];
-            if (!saveState({ pending: target })) return;
             pending = target;
             spinning = true;
+            $('wheelReveal').hidden = true;
+            $('wheelReveal').textContent = '';
+            $('confirmBtn').hidden = true;
+            $('rerollBtn').hidden = true;
+            $('spinBtn').hidden = false;
             $('spinBtn').disabled = true;
             $('changePlayerBtn').disabled = true;
             $('resetBtn').disabled = true;
@@ -644,6 +650,8 @@
                     $('changePlayerBtn').hidden = true;
                     $('confirmBtn').hidden = false;
                     $('confirmBtn').disabled = true;
+                    $('rerollBtn').hidden = false;
+                    $('rerollBtn').disabled = true;
                     function openGift(time) {
                         const opening = Math.min((time - revealStart) / 700, 1);
                         drawWheel(opening);
@@ -653,6 +661,7 @@
                         } else {
                             spinning = false;
                             $('confirmBtn').disabled = false;
+                            $('rerollBtn').disabled = false;
                             $('confirmBtn').focus();
                         }
                     }
@@ -660,6 +669,14 @@
                 }
             }
             requestAnimationFrame(animate);
+        }
+        $('spinBtn').addEventListener('click', spin);
+        $('rerollBtn').addEventListener('click', () => {
+            if (spinning || pending === null) return;
+            if (restoredPending && !saveState({ pending: null })) return;
+            restoredPending = false;
+            pending = null;
+            spin();
         });
         canvas.addEventListener('click', () => $('spinBtn').click());
 
@@ -676,10 +693,12 @@
             assignments.push({ player: currentPlayer, target: pending });
             currentPlayer = null;
             pending = null;
+            restoredPending = false;
             $('wheelReveal').hidden = true;
             $('wheelReveal').textContent = '';
             drawWheel();
             $('confirmBtn').hidden = true;
+            $('rerollBtn').hidden = true;
             $('resetBtn').disabled = false;
             $('adminBtn').disabled = false;
             $('changePlayerBtn').disabled = false;
@@ -810,6 +829,7 @@
             assignments = [];
             currentPlayer = null;
             pending = null;
+            restoredPending = false;
             angle = 0;
             $('game').hidden = true;
             $('setup').hidden = false;
@@ -819,6 +839,8 @@
             $('changePlayerBtn').disabled = false;
             $('confirmBtn').hidden = true;
             $('confirmBtn').disabled = false;
+            $('rerollBtn').hidden = true;
+            $('rerollBtn').disabled = false;
             $('startBtn').disabled = true;
             $('adminBtn').hidden = true;
             $('saveChain').checked = false;
@@ -880,6 +902,7 @@
             adminHash = state.adminHash ?? null;
             currentPlayer = state.currentPlayer;
             pending = state.pending;
+            restoredPending = pending !== null;
             if (!started) {
                 renderTags($('namesPreview'), names);
                 $('startBtn').disabled = names.length < 2;
@@ -907,6 +930,8 @@
                 $('adminBtn').disabled = true;
                 $('confirmBtn').hidden = false;
                 $('confirmBtn').disabled = false;
+                $('rerollBtn').hidden = false;
+                $('rerollBtn').disabled = false;
                 drawWheel(1);
                 showReveal(1);
                 $('confirmBtn').focus();

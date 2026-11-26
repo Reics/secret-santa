@@ -188,32 +188,50 @@ const page = vm.createContext({
     console: { error() {} }
 });
 vm.runInContext(script[1], page);
-vm.runInContext("names.push('Ana', 'Beto'); remaining = [...names]; currentPlayer = 'Ana'; started = true;", page);
+vm.runInContext("names.push('Ana', 'Beto'); remaining = [...names]; currentPlayer = 'Ana'; started = true; saveState();", page);
 
 let pendingSnapshot;
+let unsavedSnapshot;
 function spinAndConfirm(expected) {
+    const beforeSpin = storedValue;
     getElementById('spinBtn').events.click();
+    assert.equal(storedValue, beforeSpin);
     frame(3000);
     assert.equal(getElementById('spinBtn').hidden, true);
     assert.equal(getElementById('changePlayerBtn').hidden, true);
     assert.equal(getElementById('confirmBtn').hidden, false);
     assert.equal(getElementById('confirmBtn').disabled, true);
+    assert.equal(getElementById('rerollBtn').hidden, false);
+    assert.equal(getElementById('rerollBtn').disabled, true);
     frame(3700);
     assert.equal(getElementById('confirmBtn').disabled, false);
+    assert.equal(getElementById('rerollBtn').disabled, false);
     assert.equal(getElementById('wheelReveal').textContent, expected);
     const saved = JSON.parse(storedValue);
-    assert.equal(saved.pending, expected);
+    assert.equal(saved.pending, null);
     assert.equal(saved.assignments.length, expected === 'Beto' ? 0 : 1);
-    if (expected === 'Beto') pendingSnapshot = storedValue;
+    if (expected === 'Beto') {
+        unsavedSnapshot = storedValue;
+        pendingSnapshot = JSON.stringify({ ...saved, pending: expected });
+        getElementById('rerollBtn').click();
+        assert.equal(storedValue, beforeSpin);
+        assert.equal(getElementById('wheelReveal').hidden, true);
+        assert.equal(getElementById('confirmBtn').hidden, true);
+        frame(3000);
+        frame(3700);
+        assert.equal(getElementById('wheelReveal').textContent, expected);
+        assert.equal(storedValue, beforeSpin);
+    }
     failWrites = true;
     getElementById('confirmBtn').events.click();
     assert.equal(getElementById('confirmBtn').hidden, false);
     assert.equal(getElementById('wheelReveal').textContent, expected);
     assert.equal(getElementById('storageAlert').hidden, false);
-    assert.equal(JSON.parse(storedValue).pending, expected);
+    assert.equal(JSON.parse(storedValue).pending, null);
     failWrites = false;
     getElementById('confirmBtn').events.click();
     assert.equal(getElementById('confirmBtn').hidden, true);
+    assert.equal(getElementById('rerollBtn').hidden, true);
     assert.equal(getElementById('wheelReveal').hidden, true);
     assert.equal(getElementById('wheelReveal').textContent, '');
 }
@@ -229,7 +247,7 @@ assert.equal(getElementById('changePlayerBtn').hidden, true);
 assert.equal(getElementById('progress').textContent, '2 de 2 participantes han girado.');
 console.log('La confirmación reemplaza los botones y restaura el siguiente turno.');
 
-function reloadFrom(value, crypto = require('node:crypto').webcrypto) {
+function reloadFrom(value, crypto = require('node:crypto').webcrypto, math = Math) {
     storedValue = value;
     const restored = new Map();
     function getRestored(id) {
@@ -239,7 +257,7 @@ function reloadFrom(value, crypto = require('node:crypto').webcrypto) {
     const restoredWheel = getRestored('wheel');
     restoredWheel.width = restoredWheel.height = 400;
     restoredWheel.getContext = () => ctx;
-    for (const id of ['game', 'confirmBtn', 'wheelReveal', 'selectModal', 'storageAlert', 'discardSavedBtn',
+    for (const id of ['game', 'confirmBtn', 'rerollBtn', 'wheelReveal', 'selectModal', 'storageAlert', 'discardSavedBtn',
         'adminBtn', 'setupCodeContainer', 'adminResults']) {
         getRestored(id).hidden = true;
     }
@@ -248,11 +266,12 @@ function reloadFrom(value, crypto = require('node:crypto').webcrypto) {
         localStorage,
         window: { crypto },
         crypto,
+        Math: math,
         TextEncoder,
         confirm: () => true,
         console: { error() {} },
         performance: { now: () => 0 },
-        requestAnimationFrame() { throw new Error('No debe girar al restaurar'); }
+        requestAnimationFrame(callback) { frame = callback; }
     });
     vm.runInContext(script[1], reloadedPage);
     return getRestored;
@@ -264,6 +283,41 @@ assert.equal(pendingPage('confirmBtn').hidden, false);
 assert.equal(pendingPage('spinBtn').disabled, true);
 pendingPage('wheel').click();
 assert.equal(storedValue, pendingSnapshot);
+failWrites = true;
+pendingPage('rerollBtn').click();
+assert.equal(storedValue, pendingSnapshot);
+assert.equal(pendingPage('wheelReveal').textContent, 'Beto');
+assert.equal(pendingPage('storageAlert').hidden, false);
+failWrites = false;
+pendingPage('rerollBtn').click();
+assert.equal(JSON.parse(storedValue).pending, null);
+frame(3000);
+frame(3700);
+assert.equal(pendingPage('wheelReveal').textContent, 'Beto');
+assert.equal(JSON.parse(storedValue).assignments.length, 0);
+const unconfirmedPage = reloadFrom(unsavedSnapshot);
+assert.equal(unconfirmedPage('wheelReveal').hidden, true);
+assert.equal(unconfirmedPage('confirmBtn').hidden, true);
+assert.equal(unconfirmedPage('turn').textContent, 'Turno de Ana');
+const draws = [0, 0, 0.99, 0];
+const controlledMath = Object.create(Math);
+controlledMath.random = () => draws.shift();
+const beforeReroll = JSON.stringify({
+    version: 1, started: true, names: ['Ana', 'Beto', 'Ceci'], assignments: [],
+    currentPlayer: 'Ana', pending: null
+});
+const rerollPage = reloadFrom(beforeReroll, undefined, controlledMath);
+rerollPage('spinBtn').click();
+frame(3000);
+frame(3700);
+assert.equal(rerollPage('wheelReveal').textContent, 'Beto');
+rerollPage('rerollBtn').click();
+frame(3000);
+frame(3700);
+assert.equal(rerollPage('wheelReveal').textContent, 'Ceci');
+assert.equal(storedValue, beforeReroll);
+rerollPage('confirmBtn').click();
+assert.deepEqual(JSON.parse(storedValue).assignments, [{ player: 'Ana', target: 'Ceci' }]);
 const partialPage = reloadFrom(partialSnapshot);
 assert.equal(partialPage('selectModal').hidden, false);
 assert.equal(partialPage('playerList').children[0].textContent, 'Beto');
